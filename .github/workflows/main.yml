@@ -48,6 +48,10 @@ jobs:
           xbps-install --version
           xbps-query --version
 
+      - name: Configure chroot
+        run: |
+          echo 'XBPS_CHROOT_CMD=bwrap' >> etc/conf
+
       - name: Bootstrap XBPS
         run: |
           ./xbps-src binary-bootstrap
