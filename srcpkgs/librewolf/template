@@ -1,4 +1,3 @@
-```sh
 # Template file for 'librewolf'
 
 pkgname=librewolf
@@ -224,4 +223,3 @@ do_install() {
 		"${DESTDIR}/usr/lib/firefox-devel" \
 		"${DESTDIR}/usr/share/idl"
 }
-```
