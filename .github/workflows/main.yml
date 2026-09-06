@@ -7,16 +7,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    container:
+      image: ghcr.io/void-linux/void-glibc-full
+
     steps:
+      - name: Install Git
+        run: |
+          xbps-install -Syu
+          xbps-install -y git
+
       - name: Checkout void-packages
         uses: actions/checkout@v4
 
-      - name: Install Void Linux build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xz-utils
-
-      - name: Bootstrap XBPS
+      - name: Bootstrap build environment
         run: |
           ./xbps-src binary-bootstrap
 
