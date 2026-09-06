@@ -1,75 +1,173 @@
+```yaml
 name: Build Void package
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# ============================================================
+# Change only this value when building another package.
+# Examples:
+#   PACKAGE: librewolf
+#   PACKAGE: firefox
+#   PACKAGE: chromium
+# ============================================================
+env:
+  PACKAGE: librewolf
+
+  # Keep caches compatible with the runner/toolchain layout.
+  XBPS_CACHE_VERSION: v2
+  XBPS_ARCH: x86_64
+  XBPS_MIRROR: https://repo-default.voidlinux.org/current
+
 jobs:
   build:
+    name: Build ${{ env.PACKAGE }}
     runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout void-packages
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # --------------------------------------------------------
+      # Cache the useful persistent XBPS state.
+      #
+      # repocache  = downloaded binary package dependencies
+      # sources    = downloaded source archives
+      # ccache     = compiler cache
+      #
+      # masterdir is intentionally NOT cached:
+      # it is large, environment-dependent, and less reliable
+      # to restore across runner/toolchain changes.
+      # --------------------------------------------------------
+      - name: Restore XBPS cache
+        id: xbps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            hostdir/repocache
+            hostdir/sources
+            hostdir/ccache
+          key: >-
+            xbps-${{ env.XBPS_CACHE_VERSION }}-
+            ${{ runner.os }}-
+            ${{ runner.arch }}-
+            ${{ env.XBPS_ARCH }}-
+            void
+          restore-keys: |
+            xbps-${{ env.XBPS_CACHE_VERSION }}-${{ runner.os }}-${{ runner.arch }}-${{ env.XBPS_ARCH }}-
+            xbps-${{ env.XBPS_CACHE_VERSION }}-${{ runner.os }}-
+            xbps-${{ env.XBPS_CACHE_VERSION }}-
 
       - name: Install host dependencies
         run: |
+          set -euxo pipefail
+
           sudo apt-get update
-          sudo apt-get install -y \
-            curl \
-            git \
+
+          sudo apt-get install -y --no-install-recommends \
+            bubblewrap \
             build-essential \
             binutils \
+            curl \
+            git \
             tar \
-            xz-utils \
             util-linux \
-            bubblewrap
+            xz-utils
 
       - name: Install static XBPS
+        env:
+          XBPS_HOME: ${{ runner.temp }}/xbps-static
         run: |
-          mkdir -p "$HOME/XBPS"
+          set -euxo pipefail
 
-          curl -L \
+          mkdir -p "$XBPS_HOME"
+
+          curl --fail --location --retry 5 --retry-all-errors \
             "https://repo-default.voidlinux.org/static/xbps-static-latest.x86_64-musl.tar.xz" \
-            -o /tmp/xbps.tar.xz
+            --output "$RUNNER_TEMP/xbps-static.tar.xz"
 
-          tar -xJf /tmp/xbps.tar.xz -C "$HOME/XBPS"
+          tar -xJf \
+            "$RUNNER_TEMP/xbps-static.tar.xz" \
+            -C "$XBPS_HOME"
 
-          echo "$HOME/XBPS/usr/bin" >> "$GITHUB_PATH"
+          echo "$XBPS_HOME/usr/bin" >> "$GITHUB_PATH"
 
-      - name: Check XBPS
+      - name: Verify XBPS
         run: |
-          which xbps-install
-          which xbps-query
-          which xbps-uhelper
-          which xbps-create
-          which xbps-uchroot
-          which xbps-uunshare
+          set -euxo pipefail
+
+          command -v xbps-install
+          command -v xbps-query
+          command -v xbps-uhelper
+          command -v xbps-create
+          command -v xbps-uchroot
+          command -v xbps-uunshare
 
           xbps-install --version
           xbps-query --version
 
-      - name: Configure chroot
+      - name: Configure xbps-src
         run: |
-          echo 'XBPS_CHROOT_CMD=bwrap' >> etc/conf
+          set -euxo pipefail
+
+          cat >> etc/conf <<EOF
+          XBPS_CHROOT_CMD=bwrap
+          XBPS_CCACHE=yes
+          XBPS_MIRROR=${XBPS_MIRROR}
+          EOF
 
       - name: Allow Bubblewrap user namespaces
         run: |
+          set -euxo pipefail
+
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      # --------------------------------------------------------
+      # Creates/updates the Void build environment.
+      #
+      # Dependencies downloaded here are persisted through
+      # hostdir/repocache and hostdir/sources.
+      # --------------------------------------------------------
       - name: Bootstrap XBPS
         run: |
+          set -euxo pipefail
+
           ./xbps-src binary-bootstrap
 
-      - name: Build librewolf
+      - name: Build ${{ env.PACKAGE }}
         run: |
-          ./xbps-src pkg librewolf
+          set -euxo pipefail
+
+          ./xbps-src pkg "$PACKAGE"
 
       - name: Show generated packages
         run: |
-          find hostdir/binpkgs -type f -name '*.xbps' -print
+          set -euxo pipefail
+
+          find hostdir/binpkgs \
+            -type f \
+            -name '*.xbps' \
+            -print \
+            | sort
+
+      - name: Show package metadata
+        run: |
+          set -euxo pipefail
+
+          ./xbps-src show-build-deps "$PACKAGE" || true
 
       - name: Upload XBPS package
         uses: actions/upload-artifact@v4
         with:
-          name: librewolf-xbps
-          path: hostdir/binpkgs/**/*.xbps
+          name: ${{ env.PACKAGE }}-xbps
+          if-no-files-found: error
+          compression-level: 0
+          path: |
+            hostdir/binpkgs/*.xbps
+            hostdir/binpkgs/**/*.xbps
+```
