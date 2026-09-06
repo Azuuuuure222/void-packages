@@ -1,3 +1,16 @@
+name: Build Void package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout void-packages
+        uses: actions/checkout@v4
+
       - name: Install host dependencies
         run: |
           sudo apt-get update
@@ -46,3 +59,17 @@
       - name: Bootstrap XBPS
         run: |
           ./xbps-src binary-bootstrap
+
+      - name: Build libraw
+        run: |
+          ./xbps-src pkg libraw
+
+      - name: Show generated packages
+        run: |
+          find hostdir/binpkgs -type f -name '*.xbps' -print
+
+      - name: Upload XBPS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: libraw-xbps
+          path: hostdir/binpkgs/**/*.xbps
