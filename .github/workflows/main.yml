@@ -5,27 +5,57 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
-    container:
-      image: ghcr.io/void-linux/void-glibc-full
+    runs-on: ubuntu-24.04
 
     steps:
-      - name: Install Git
-        run: |
-          xbps-install -Syu
-          xbps-install -y git
-
       - name: Checkout void-packages
         uses: actions/checkout@v4
 
-      - name: Bootstrap build environment
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl \
+            wget \
+            git \
+            build-essential \
+            binutils \
+            tar \
+            xz-utils \
+            util-linux \
+            bubblewrap
+
+      - name: Install static XBPS
+        run: |
+          mkdir -p "$HOME/XBPS"
+
+          curl -L \
+            "https://repo-default.voidlinux.org/static/xbps-static-latest.x86_64-musl.tar.xz" \
+            -o /tmp/xbps.tar.xz
+
+          tar -xJf /tmp/xbps.tar.xz -C "$HOME/XBPS"
+
+          echo "$HOME/XBPS/usr/bin" >> "$GITHUB_PATH"
+
+      - name: Check XBPS
+        run: |
+          which xbps-install
+          which xbps-query
+          which xbps-uhelper
+          xbps-install --version
+          xbps-query --version
+
+      - name: Bootstrap XBPS
         run: |
           ./xbps-src binary-bootstrap
 
       - name: Build libraw
         run: |
           ./xbps-src pkg libraw
+
+      - name: Show packages
+        run: |
+          find hostdir/binpkgs -type f -name '*.xbps' -print
 
       - name: Upload XBPS package
         uses: actions/upload-artifact@v4
