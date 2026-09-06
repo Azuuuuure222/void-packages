@@ -11,12 +11,11 @@ jobs:
       - name: Checkout void-packages
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install host dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             curl \
-            wget \
             git \
             build-essential \
             binutils \
@@ -42,6 +41,10 @@ jobs:
           which xbps-install
           which xbps-query
           which xbps-uhelper
+          which xbps-create
+          which xbps-uchroot
+          which xbps-uunshare
+
           xbps-install --version
           xbps-query --version
 
@@ -53,7 +56,7 @@ jobs:
         run: |
           ./xbps-src pkg libraw
 
-      - name: Show packages
+      - name: Show generated packages
         run: |
           find hostdir/binpkgs -type f -name '*.xbps' -print
 
