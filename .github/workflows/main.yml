@@ -1,0 +1,22 @@
+name: Build Void package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout void-packages
+        uses: actions/checkout@v4
+
+      - name: Build libraw
+        run: |
+          ./xbps-src pkg libraw
+
+      - name: Upload XBPS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: libraw-xbps
+          path: hostdir/binpkgs/**/*.xbps
