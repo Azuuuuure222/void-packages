@@ -1,4 +1,3 @@
-```yaml
 name: Build Void package
 
 on:
@@ -210,4 +209,3 @@ jobs:
           path: |
             hostdir/binpkgs/**/*.xbps
             hostdir/binpkgs/*.xbps
-```
