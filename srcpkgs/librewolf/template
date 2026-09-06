@@ -1,10 +1,10 @@
+```sh
 # Template file for 'librewolf'
 
 pkgname=librewolf
 version=155.0.1
 revision=1
 
-# LibreWolf's source release has a second revision component.
 _rev=1
 wrksrc=${pkgname}-${version}-${_rev}
 
@@ -14,58 +14,68 @@ short_desc="LibreWolf web browser"
 maintainer="Your Name <you@example.com>"
 license="GPL-3.0-only AND LGPL-2.1-only AND LGPL-3.0-only AND MPL-2.0"
 homepage="https://librewolf.net"
+changelog="https://librewolf.net/news/"
 
 distfiles="https://librewolf.dev/api/packages/librewolf/generic/librewolf-source/${version}-${_rev}/${pkgname}-${version}-${_rev}.source.tar.gz"
 checksum=824b084991313f6a980ff64d7af14fd67357fd3f15a7ad338d0cca87c5133208
 
 lib32disabled=yes
 
+_llvmver=22
+
 hostmakedepends="
- unzip
- zip
- pkg-config
- perl
- python3
- yasm
- rust
- cargo
- llvm22
- clang22
- lld22
- nodejs
- cbindgen
- nasm
- which
- tar
- xz
+	unzip
+	zip
+	pkg-config
+	perl
+	python3
+	yasm
+	rust
+	cargo
+	llvm${_llvmver}
+	clang${_llvmver}
+	lld${_llvmver}
+	nodejs
+	cbindgen
+	nasm
+	which
+	tar
+	xz
 "
 
 makedepends="
- nss-devel
- libjpeg-turbo-devel
- gtk+3-devel
- pixman-devel
- libevent-devel
- libnotify-devel
- libwebp-devel
- libXrender-devel
- libXcomposite-devel
- libSM-devel
- libXt-devel
- libXdamage-devel
- freetype-devel
- alsa-lib-devel
+	nss-devel
+	libjpeg-turbo-devel
+	gtk+3-devel
+	pixman-devel
+	libevent-devel
+	libnotify-devel
+	libwebp-devel
+	libXrender-devel
+	libXcomposite-devel
+	libSM-devel
+	libXt-devel
+	libXdamage-devel
+	freetype-devel
+	rust-std
+	$(vopt_if alsa alsa-lib-devel)
+	$(vopt_if jack jack-devel)
+	$(vopt_if dbus dbus-glib-devel)
+	$(vopt_if pulseaudio pulseaudio-devel)
+	$(vopt_if xscreensaver libXScrnSaver-devel)
+	$(vopt_if sndio sndio-devel)
 "
 
 depends="
- nss
- nspr
- desktop-file-utils
- hicolor-icon-theme
- pciutils
+	nss
+	nspr
+	desktop-file-utils
+	hicolor-icon-theme
+	pciutils
 "
 
 build_options="alsa jack dbus pulseaudio xscreensaver sndio wayland lto clang"
+
 build_options_default="alsa jack dbus pulseaudio xscreensaver sndio wayland clang"
 
 desc_option_lto="Enable Link Time Optimization"
@@ -77,39 +87,64 @@ post_extract() {
 }
 
 do_build() {
-	export CC=clang
-	export CXX=clang++
-	export AS=clang
-	export AR=llvm-ar
-	export NM=llvm-nm
-	export HOST_CC=clang
-	export HOST_CXX=clang++
-
 	export CFLAGS="-O2"
 	export CXXFLAGS="-O2"
 	export AS="${CC}"
 
+	# Firefox/LibreWolf's build system uses HOST_C{,XX}FLAGS internally;
+	# exporting them can leak inappropriate flags into Cargo.
 	unset HOST_CFLAGS
 	unset HOST_CXXFLAGS
 
 	export LDFLAGS="-Wl,-rpath=/usr/lib/librewolf"
+
 	export MOZ_MAKE_FLAGS="${makejobs}"
 	export MOZ_NOSPAM=1
 	export MOZ_REQUIRE_SIGNING=
 	export MOZILLA_OFFICIAL=1
+
 	export MOZBUILD_STATE_PATH="${wrksrc}/mozbuild"
 	export MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE=system
 
 	if [ "$SOURCE_DATE_EPOCH" ]; then
-		export MOZ_BUILD_DATE=$(date --date "@$SOURCE_DATE_EPOCH" "+%Y%m%d%H%M%S")
+		export MOZ_BUILD_DATE="$(date --date "@$SOURCE_DATE_EPOCH" "+%Y%m%d%H%M%S")"
 	fi
+
+	if [ "$build_option_clang" ]; then
+		export CC=clang
+		export CXX=clang++
+		export AS=clang
+		export AR=llvm-ar
+		export NM=llvm-nm
+		export HOST_CC=clang
+		export HOST_CXX=clang++
+		export ASFLAGS="--target=${XBPS_CROSS_TRIPLET:-${XBPS_TRIPLET}}"
+	fi
+
+	# Firefox disables jemalloc on musl.
+	if [ "$XBPS_TARGET_LIBC" = "musl" ]; then
+		disable_jemalloc="
+ac_add_options --disable-jemalloc
+"
+	else
+		disable_jemalloc=
+	fi
+
+	# Disable ELF hack on architectures where it is unsupported/problematic.
+	case "$XBPS_TARGET_MACHINE" in
+		x86_64*|i686*|arm*|aarch64*)
+			disable_elfhack="
+ac_add_options --disable-elf-hack
+"
+			;;
+		*)
+			disable_elfhack=
+			;;
+	esac
 
 	cat > mozconfig <<EOF
 ac_add_options --prefix=/usr
 ac_add_options --libdir=/usr/lib
-
-ac_add_options --host=${XBPS_TRIPLET}
-ac_add_options --target=${XBPS_CROSS_TRIPLET:-${XBPS_TRIPLET}}
 
 ac_add_options --enable-application=browser
 ac_add_options --enable-release
@@ -126,10 +161,8 @@ ac_add_options --disable-strip
 ac_add_options --disable-profiling
 ac_add_options --disable-debug
 ac_add_options --disable-debug-symbols
-ac_add_options --disable-elf-hack
 
 ac_add_options --enable-system-pixman
-ac_add_options --with-system-ffi
 ac_add_options --with-system-jpeg
 ac_add_options --with-system-libevent
 ac_add_options --with-system-nspr
@@ -141,28 +174,31 @@ ac_add_options --without-system-png
 
 ac_add_options --with-mozilla-api-keyfile="${wrksrc}/mozilla-api-key"
 
-ac_add_options --enable-dbus
-ac_add_options --enable-necko-wifi
-ac_add_options --enable-alsa
-ac_add_options --enable-jack
-ac_add_options --enable-pulseaudio
-ac_add_options --enable-sndio
+$(vopt_if dbus 'ac_add_options --enable-dbus')
+$(vopt_if dbus 'ac_add_options --enable-necko-wifi')
+$(vopt_if alsa 'ac_add_options --enable-alsa')
+$(vopt_if jack 'ac_add_options --enable-jack')
+$(vopt_if pulseaudio 'ac_add_options --enable-pulseaudio')
+$(vopt_if sndio 'ac_add_options --enable-sndio')
 
-ac_add_options --enable-default-toolkit=cairo-gtk3-wayland
+ac_add_options --enable-default-toolkit=$(vopt_if wayland 'cairo-gtk3-wayland' 'cairo-gtk3')
 
-ac_add_options --enable-wayland
-
-MOZ_APP_REMOTINGNAME=librewolf
+$(vopt_if lto 'ac_add_options --enable-lto')
 
 ac_add_options --with-app-name=librewolf
 ac_add_options --with-branding=browser/branding/librewolf
 ac_add_options --with-l10n-base=\$PWD/lw/l10n
+
+MOZ_APP_REMOTINGNAME=librewolf
 
 mk_add_options MOZ_OBJDIR="${wrksrc}/obj"
 mk_add_options MOZ_CRASHREPORTER=0
 mk_add_options MOZ_DATA_REPORTING=0
 mk_add_options MOZ_SERVICES_HEALTHREPORT=0
 mk_add_options MOZ_TELEMETRY_REPORTING=0
+
+${disable_jemalloc}
+${disable_elfhack}
 EOF
 
 	./mach build
@@ -176,15 +212,16 @@ do_install() {
 
 	# LibreWolf executable symlink.
 	ln -sf librewolf \
-		${DESTDIR}/usr/lib/librewolf/librewolf-bin
+		"${DESTDIR}/usr/lib/librewolf/librewolf-bin"
 
-	# Wayland launcher.
+	# Backwards compatibility with the old Wayland wrapper.
 	ln -sf librewolf \
-		${DESTDIR}/usr/bin/librewolf-wayland
+		"${DESTDIR}/usr/bin/librewolf-wayland"
 
 	# Remove development files.
 	rm -rf \
-		${DESTDIR}/usr/include \
-		${DESTDIR}/usr/lib/firefox-devel \
-		${DESTDIR}/usr/share/idl
+		"${DESTDIR}/usr/include" \
+		"${DESTDIR}/usr/lib/firefox-devel" \
+		"${DESTDIR}/usr/share/idl"
 }
+```
