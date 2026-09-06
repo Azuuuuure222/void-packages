@@ -1,3 +1,4 @@
+```yaml
 name: Build Void package
 
 on:
@@ -6,65 +7,67 @@ on:
 permissions:
   contents: read
 
-# ============================================================
-# Change only this value when building another package.
-# Examples:
-#   PACKAGE: librewolf
-#   PACKAGE: firefox
-#   PACKAGE: chromium
-# ============================================================
-env:
-  PACKAGE: librewolf
-
-  # Keep caches compatible with the runner/toolchain layout.
-  XBPS_CACHE_VERSION: v2
-  XBPS_ARCH: x86_64
-  XBPS_MIRROR: https://repo-default.voidlinux.org/current
-
 jobs:
   build:
-    name: Build ${{ env.PACKAGE }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ======================================================
+        # CHANGE ONLY THIS VALUE TO BUILD ANOTHER PACKAGE
+        # ======================================================
+        package:
+          - librewolf
+
+    name: Build ${{ matrix.package }}
     runs-on: ubuntu-24.04
 
+    env:
+      PACKAGE: ${{ matrix.package }}
+      XBPS_CHROOT_CMD: bwrap
+      XBPS_CCACHE: yes
+      XBPS_MIRROR: https://repo-default.voidlinux.org/current
+
     steps:
+      # --------------------------------------------------------
+      # Source checkout
+      # --------------------------------------------------------
       - name: Checkout void-packages
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       # --------------------------------------------------------
-      # Cache the useful persistent XBPS state.
+      # Restore persistent XBPS data
       #
-      # repocache  = downloaded binary package dependencies
-      # sources    = downloaded source archives
-      # ccache     = compiler cache
+      # repocache = downloaded XBPS dependencies
+      # sources   = downloaded source archives
+      # ccache    = compiler cache
       #
-      # masterdir is intentionally NOT cached:
-      # it is large, environment-dependent, and less reliable
-      # to restore across runner/toolchain changes.
+      # github.run_id makes every run save a new snapshot.
+      # restore-keys lets the new run reuse the previous cache.
       # --------------------------------------------------------
       - name: Restore XBPS cache
-        id: xbps-cache
         uses: actions/cache@v4
         with:
           path: |
             hostdir/repocache
             hostdir/sources
             hostdir/ccache
-          key: >-
-            xbps-${{ env.XBPS_CACHE_VERSION }}-
-            ${{ runner.os }}-
-            ${{ runner.arch }}-
-            ${{ env.XBPS_ARCH }}-
-            void
-          restore-keys: |
-            xbps-${{ env.XBPS_CACHE_VERSION }}-${{ runner.os }}-${{ runner.arch }}-${{ env.XBPS_ARCH }}-
-            xbps-${{ env.XBPS_CACHE_VERSION }}-${{ runner.os }}-
-            xbps-${{ env.XBPS_CACHE_VERSION }}-
 
+          key: >-
+            xbps-v2-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
+
+          restore-keys: |
+            xbps-v2-${{ runner.os }}-${{ runner.arch }}-
+
+          save-always: true
+
+      # --------------------------------------------------------
+      # Install host-side prerequisites
+      # --------------------------------------------------------
       - name: Install host dependencies
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           sudo apt-get update
 
@@ -78,75 +81,108 @@ jobs:
             util-linux \
             xz-utils
 
+      # --------------------------------------------------------
+      # Install static musl XBPS
+      # --------------------------------------------------------
       - name: Install static XBPS
         env:
           XBPS_HOME: ${{ runner.temp }}/xbps-static
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           mkdir -p "$XBPS_HOME"
 
-          curl --fail --location --retry 5 --retry-all-errors \
-            "https://repo-default.voidlinux.org/static/xbps-static-latest.x86_64-musl.tar.xz" \
-            --output "$RUNNER_TEMP/xbps-static.tar.xz"
+          curl \
+            --fail \
+            --location \
+            --retry 5 \
+            --retry-all-errors \
+            --silent \
+            --show-error \
+            --output "$RUNNER_TEMP/xbps-static.tar.xz" \
+            "https://repo-default.voidlinux.org/static/xbps-static-latest.x86_64-musl.tar.xz"
 
-          tar -xJf \
-            "$RUNNER_TEMP/xbps-static.tar.xz" \
-            -C "$XBPS_HOME"
+          tar \
+            --extract \
+            --xz \
+            --file "$RUNNER_TEMP/xbps-static.tar.xz" \
+            --directory "$XBPS_HOME"
 
           echo "$XBPS_HOME/usr/bin" >> "$GITHUB_PATH"
 
+      # --------------------------------------------------------
+      # Verify static XBPS installation
+      # --------------------------------------------------------
       - name: Verify XBPS
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
-          command -v xbps-install
-          command -v xbps-query
-          command -v xbps-uhelper
-          command -v xbps-create
-          command -v xbps-uchroot
-          command -v xbps-uunshare
+          for tool in \
+            xbps-install \
+            xbps-query \
+            xbps-uhelper \
+            xbps-create \
+            xbps-uchroot \
+            xbps-uunshare
+          do
+            command -v "$tool"
+          done
 
           xbps-install --version
           xbps-query --version
 
+      # --------------------------------------------------------
+      # Configure xbps-src
+      # --------------------------------------------------------
       - name: Configure xbps-src
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           cat >> etc/conf <<EOF
-          XBPS_CHROOT_CMD=bwrap
-          XBPS_CCACHE=yes
+          XBPS_CHROOT_CMD=${XBPS_CHROOT_CMD}
+          XBPS_CCACHE=${XBPS_CCACHE}
           XBPS_MIRROR=${XBPS_MIRROR}
           EOF
 
+      # --------------------------------------------------------
+      # Ubuntu AppArmor can restrict unprivileged user namespaces,
+      # which Bubblewrap needs.
+      # --------------------------------------------------------
       - name: Allow Bubblewrap user namespaces
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       # --------------------------------------------------------
-      # Creates/updates the Void build environment.
+      # Create the Void build environment.
       #
-      # Dependencies downloaded here are persisted through
-      # hostdir/repocache and hostdir/sources.
+      # Dependencies downloaded here are stored in hostdir and
+      # persisted by the GitHub Actions cache.
       # --------------------------------------------------------
       - name: Bootstrap XBPS
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           ./xbps-src binary-bootstrap
 
-      - name: Build ${{ env.PACKAGE }}
+      # --------------------------------------------------------
+      # Build selected package
+      # --------------------------------------------------------
+      - name: Build ${{ matrix.package }}
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           ./xbps-src pkg "$PACKAGE"
 
+      # --------------------------------------------------------
+      # Display everything that was produced
+      # --------------------------------------------------------
       - name: Show generated packages
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+
+          echo "Generated XBPS packages:"
 
           find hostdir/binpkgs \
             -type f \
@@ -154,18 +190,24 @@ jobs:
             -print \
             | sort
 
-      - name: Show package metadata
+      # --------------------------------------------------------
+      # Show build dependencies for debugging
+      # --------------------------------------------------------
+      - name: Show build dependencies
+        if: always()
         run: |
-          set -euxo pipefail
-
           ./xbps-src show-build-deps "$PACKAGE" || true
 
+      # --------------------------------------------------------
+      # Upload resulting binary packages
+      # --------------------------------------------------------
       - name: Upload XBPS package
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PACKAGE }}-xbps
+          name: ${{ matrix.package }}-xbps
           if-no-files-found: error
           compression-level: 0
           path: |
-            hostdir/binpkgs/*.xbps
             hostdir/binpkgs/**/*.xbps
+            hostdir/binpkgs/*.xbps
+```
