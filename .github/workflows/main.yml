@@ -60,9 +60,9 @@ jobs:
         run: |
           ./xbps-src binary-bootstrap
 
-      - name: Build libraw
+      - name: Build librewolf
         run: |
-          ./xbps-src pkg libraw
+          ./xbps-src pkg librewolf
 
       - name: Show generated packages
         run: |
@@ -71,5 +71,5 @@ jobs:
       - name: Upload XBPS package
         uses: actions/upload-artifact@v4
         with:
-          name: libraw-xbps
+          name: librewolf-xbps
           path: hostdir/binpkgs/**/*.xbps
